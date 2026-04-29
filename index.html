@@ -727,18 +727,21 @@ async function saveConfig(){
   if(!rate||rate<1)return toast('⚠️ أدخل سعر صرف صحيح','warning');
   const symbols={USD:'$',AED:'د.إ',EUR:'€',SAR:'ر.س',TRY:'₺'};
   const today=new Date().toISOString().split('T')[0];
-  cfg={currency:sel.value,currency_symbol:symbols[sel.value]||'',rate,updated:today};
-  loader(true,'جاري حفظ سعر الصرف...');
-  const b64=btoa(unescape(encodeURIComponent(JSON.stringify(cfg,null,2))));
-  const url=`https://api.github.com/repos/${GH.user}/${GH.repo}/contents/config.json`;
+  cfg={currency:sel.value,currency_symbol:symbols[sel.value]||'$',rate,updated:today};
+  loader(true,'جاري حفظ سعر الصرف داخل المنتجات...');
+  // الحل الصحيح: ندمج _exchange مباشرة في products.json
+  const payload={_v:Date.now(),_exchange:{rate,currency:cfg.currency,currency_symbol:cfg.currency_symbol,updated:today},items:prods};
+  const b64=btoa(unescape(encodeURIComponent(JSON.stringify(payload,null,2))));
+  const url=`https://api.github.com/repos/${GH.user}/${GH.repo}/contents/${GH.path}`;
   try{
-    const body={message:'chore: update exchange rate',content:b64};
-    if(cfgSha)body.sha=cfgSha;
+    const body={message:'chore: update exchange rate '+rate,content:b64};
+    if(sha)body.sha=sha;
     const r=await fetch(url,{method:'PUT',headers:ghH(),body:JSON.stringify(body)});
     if(r.ok){
-      const d=await r.json();cfgSha=d.content.sha;
-      document.getElementById('set-last-update').textContent='آخر تحديث: '+today;
-      toast('✅ تم حفظ سعر الصرف ونشره','success');
+      const d=await r.json();sha=d.content.sha;
+      document.getElementById('set-last-update').textContent='آخر تحديث: '+today+' — سعر الصرف: '+rate.toLocaleString('ar-SY')+' ل.س';
+      toast('✅ تم تحديث سعر الصرف في المتجر فوراً','success');
+      pushVersionFile(d.commit.sha);
     }else toast('❌ خطأ أثناء الحفظ','danger');
   }catch{toast('❌ تعذّر الاتصال','danger');}
   loader(false);
@@ -755,6 +758,11 @@ async function loadProds(){
     const d=await r.json();sha=d.sha;
     const parsed=JSON.parse(decodeURIComponent(escape(atob(d.content))));
     prods=Array.isArray(parsed)?parsed:(parsed.items||[]);
+    // قراءة سعر الصرف المدمج إن وجد
+    if(!Array.isArray(parsed)&&parsed._exchange&&parsed._exchange.rate>0){
+      cfg=Object.assign({},cfg,parsed._exchange);
+      renderConfigUI();
+    }
   }else throw new Error();
   document.getElementById('rname').textContent=GH.repo;
   document.getElementById('rname').style.display='block';
@@ -774,7 +782,8 @@ async function pushVersionFile(commitSha){
 
 async function pushToGH(msg='✅ تم الحفظ'){
   loader(true,'جاري الحفظ...');
-  const payload={_v:Date.now(),items:prods};
+  // دمج سعر الصرف مع products.json دائماً
+  const payload={_v:Date.now(),_exchange:{rate:cfg.rate||0,currency:cfg.currency||'USD',currency_symbol:cfg.currency_symbol||'$',updated:cfg.updated||''},items:prods};
   const b64=btoa(unescape(encodeURIComponent(JSON.stringify(payload,null,2))));
   const url=`https://api.github.com/repos/${GH.user}/${GH.repo}/contents/${GH.path}`;
   try{
